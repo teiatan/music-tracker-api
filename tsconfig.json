@@ -8,6 +8,7 @@
     "outDir": "dist",
     "sourceMap": true,
     "declaration": true,
+    "types": ["node"],
     "resolveJsonModule": true
   },
   "include": ["src/**/*"],
