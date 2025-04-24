@@ -2,6 +2,77 @@ import fs from 'fs/promises';
 import path from 'path';
 import { Track, QueryParams, BatchDeleteResponse } from '../types';
 import config from '../config';
+import cloudinary from '../lib/cloudinary';
+import streamifier from 'streamifier';
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const TRACKS_DIR = config.storage.tracksDir;
+const UPLOADS_DIR = config.storage.uploadsDir;
+const GENRES_FILE = config.storage.genresFile;
+
+export const saveAudioFile = async (
+  id: string,
+  fileName: string,
+  buffer: Buffer
+): Promise<string> => {
+  if (process.env.CLOUDINARY_CLOUD_NAME) {
+    const streamUpload = () =>
+      new Promise<string>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: process.env.CLOUDINARY_FOLDER || 'tracks',
+            public_id: id,
+            resource_type: 'video', // потрібно для mp3/wav
+          },
+          (error, result) => {
+            if (result) resolve(result.secure_url);
+            else reject(error);
+          }
+        );
+
+        streamifier.createReadStream(buffer).pipe(stream);
+      });
+
+    return await streamUpload();
+  }
+
+  // fallback to local storage
+  const fileExt = path.extname(fileName);
+  const safeFileName = `${id}${fileExt}`;
+  const filePath = path.join(UPLOADS_DIR, safeFileName);
+
+  await fs.writeFile(filePath, buffer);
+
+  return safeFileName;
+};
+
+export const deleteAudioFile = async (id: string): Promise<boolean> => {
+  try {
+    const track = await getTrackById(id);
+
+    if (!track || !track.audioFile) return false;
+
+    if (process.env.CLOUDINARY_CLOUD_NAME && track.audioFile.includes('cloudinary')) {
+      const publicId = `${process.env.CLOUDINARY_FOLDER || 'tracks'}/${id}`;
+      await cloudinary.uploader.destroy(publicId, { resource_type: 'video' });
+    } else {
+      await fs.unlink(path.join(UPLOADS_DIR, track.audioFile));
+    }
+
+    await updateTrack(id, { audioFile: undefined });
+    return true;
+  } catch (err) {
+    console.error(`Failed to delete audio file for track ${id}:`, err);
+    return false;
+  }
+};
+
+
 
 /**
  * Database file paths
@@ -24,9 +95,9 @@ interface GetTracksResult {
 const isTestMode = process.env.TEST_MODE === 'true';
 
 // Get the paths from config, which will reflect the right environment
-const TRACKS_DIR = config.storage.tracksDir;
-const UPLOADS_DIR = config.storage.uploadsDir;
-const GENRES_FILE = config.storage.genresFile;
+// const TRACKS_DIR = config.storage.tracksDir;
+// const UPLOADS_DIR = config.storage.uploadsDir;
+// const GENRES_FILE = config.storage.genresFile;
 
 // Log paths in development for debugging
 if (config.isDevelopment) {
@@ -316,41 +387,41 @@ export const deleteMultipleTracks = async (ids: string[]): Promise<BatchDeleteRe
  * @param buffer File data buffer
  * @returns Generated filename of the saved file
  */
-export const saveAudioFile = async (
-  id: string, 
-  fileName: string, 
-  buffer: Buffer
-): Promise<string> => {
-  const fileExt = path.extname(fileName);
-  const safeFileName = `${id}${fileExt}`;
-  const filePath = path.join(UPLOADS_DIR, safeFileName);
+// export const saveAudioFile = async (
+//   id: string, 
+//   fileName: string, 
+//   buffer: Buffer
+// ): Promise<string> => {
+//   const fileExt = path.extname(fileName);
+//   const safeFileName = `${id}${fileExt}`;
+//   const filePath = path.join(UPLOADS_DIR, safeFileName);
   
-  await fs.writeFile(filePath, buffer);
+//   await fs.writeFile(filePath, buffer);
   
-  return safeFileName;
-};
+//   return safeFileName;
+// };
 
 /**
  * Delete an audio file and remove its reference from the track
  * @param id ID of the track with the audio file to delete
  * @returns Boolean indicating success or failure
  */
-export const deleteAudioFile = async (id: string): Promise<boolean> => {
-  try {
-    const track = await getTrackById(id);
+// export const deleteAudioFile = async (id: string): Promise<boolean> => {
+//   try {
+//     const track = await getTrackById(id);
     
-    if (!track || !track.audioFile) {
-      return false;
-    }
+//     if (!track || !track.audioFile) {
+//       return false;
+//     }
     
-    await fs.unlink(path.join(UPLOADS_DIR, track.audioFile));
+//     await fs.unlink(path.join(UPLOADS_DIR, track.audioFile));
     
-    // Update track to remove audioFile reference
-    await updateTrack(id, { audioFile: undefined });
+//     // Update track to remove audioFile reference
+//     await updateTrack(id, { audioFile: undefined });
     
-    return true;
-  } catch (error) {
-    console.error(`Failed to delete audio file for track ${id}:`, error);
-    return false;
-  }
-};
+//     return true;
+//   } catch (error) {
+//     console.error(`Failed to delete audio file for track ${id}:`, error);
+//     return false;
+//   }
+// };
